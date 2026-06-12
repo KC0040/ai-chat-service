@@ -1,0 +1,14 @@
+{
+  "name": "ai-chat-service",
+  "version": "1.0.0",
+  "description": "共用 AI 聊天服務 — NEXAutogear + AegisRim",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "express": "^4.21.0",
+    "cors": "^2.8.5"
+  }
+}
