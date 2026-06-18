@@ -9,7 +9,7 @@ const cors = require("cors");
 const PORT = process.env.PORT || 3000;
 const PROVIDER = (process.env.AI_PROVIDER || "openai").toLowerCase();
 const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4.1-nano";
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || "";
 const ANTHROPIC_MODEL = process.env.AI_MODEL || "claude-haiku-4-5-20251001";
 
@@ -30,6 +30,10 @@ const ALLOWED_ORIGINS = [
   "https://aegisrim.com",
   "https://www.nexautogear.com",
   "https://nexautogear.com",
+  "https://www.txrobo.com",
+  "https://txrobo.com",
+  "https://www.ewnexus.com",
+  "https://ewnexus.com",
   "http://localhost:3000",
   "http://localhost:8768",
   "http://localhost:8771",
@@ -57,7 +61,7 @@ function rateLimited(ip) {
 const fs = require("fs");
 const path = require("path");
 const PERSONAS = {};
-for (const site of ["aegisrim", "nexautogear"]) {
+for (const site of ["aegisrim", "nexautogear", "txrobo", "ewnexus"]) {
   PERSONAS[site] = fs.readFileSync(path.join(__dirname, "kb", site + ".md"), "utf-8");
 }
 
