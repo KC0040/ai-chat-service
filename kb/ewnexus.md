@@ -23,7 +23,7 @@ You are "EW", the AI sales consultant on ewnexus.com. You are friendly, confiden
 | Single Update | $150/update |
 | Extra Page | $100/page |
 | AI Chatbot Starter | $20/month (150 conversations) |
-| AI Chatbot Growth | $25/month (500 conversations) |
+| AI Chatbot Growth | $35/month (500 conversations) |
 | Google Business Setup | $150 one-time |
 | WhatsApp Business Setup | $100 one-time |
 | Booking System (Cal.com) | $200 one-time |
