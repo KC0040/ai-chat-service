@@ -99,6 +99,62 @@ async function askAnthropic(system, messages) {
   return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
 }
 
+// ── Tawk.to REST API — 以 agent 身分回覆訪客 ──
+// 每個 Property 需要各自的 API Key（EasyPanel ENV 設定）
+// TAWK_API_KEY_AEGISRIM / TAWK_API_KEY_EWNEXUS / TAWK_API_KEY_NEXAUTOGEAR / TAWK_API_KEY_TXROBO
+const TAWK_KEYS = {
+  aegisrim:    process.env.TAWK_API_KEY_AEGISRIM    || "",
+  ewnexus:     process.env.TAWK_API_KEY_EWNEXUS     || "",
+  nexautogear: process.env.TAWK_API_KEY_NEXAUTOGEAR || "",
+  txrobo:      process.env.TAWK_API_KEY_TXROBO      || "",
+};
+const TAWK_PROPERTY_IDS = {
+  aegisrim:    "691c02fcdca098195ab9966a",
+  ewnexus:     "6a2e4c919e8aac1f4526f040",
+  nexautogear: "6a2d7d92d6a95f1c2c58ca23",
+  txrobo:      "6a2e4bf3d87e8d1d538f5d45",
+};
+
+async function tawkSendReply(site, chatId, text) {
+  const key = TAWK_KEYS[site];
+  const propId = TAWK_PROPERTY_IDS[site];
+  if (!key) { console.warn(`[tawk] No API key for ${site}`); return; }
+  const creds = Buffer.from(`${propId}:${key}`).toString("base64");
+  const res = await fetch(`https://api.tawk.to/v1/chat/${chatId}/message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Basic ${creds}` },
+    body: JSON.stringify({ body: text, type: "msg" }),
+  });
+  if (!res.ok) console.error(`[tawk] Reply failed ${res.status}:`, await res.text());
+}
+
+// ── Tawk.to Webhook 端點（四站各自觸發）──
+// Tawk.to → Settings → Webhooks → URL: https://new2-chatbotservice.pkxdtf.easypanel.host/tawk-webhook/{site}
+// Events: chat:msg_received（訪客送出訊息時觸發）
+app.post("/tawk-webhook/:site", async (req, res) => {
+  res.sendStatus(200); // 先回 200，避免 Tawk.to timeout 重送
+  try {
+    const site = req.params.site;
+    if (!PERSONAS[site]) { console.warn(`[tawk-webhook] Unknown site: ${site}`); return; }
+
+    const { event, chat, message } = req.body || {};
+    // 只處理訪客訊息，忽略 agent 自己送出的（避免無限迴圈）
+    if (event !== "chat:msg_received" || !message?.text || message?.sender?.type === "agent") return;
+
+    const chatId = chat?.id;
+    const userText = message.text.trim();
+    if (!chatId || !userText) return;
+
+    const reply = await (PROVIDER === "openai"
+      ? askOpenAI(PERSONAS[site], [{ role: "user", content: userText }])
+      : askAnthropic(PERSONAS[site], [{ role: "user", content: userText }]));
+
+    await tawkSendReply(site, chatId, reply);
+  } catch (err) {
+    console.error("[tawk-webhook] Error:", err.message);
+  }
+});
+
 // ── 健康檢查 ──
 app.get("/health", (_req, res) =>
   res.json({ ok: true, provider: PROVIDER, model: PROVIDER === "openai" ? OPENAI_MODEL : ANTHROPIC_MODEL })
