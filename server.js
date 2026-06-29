@@ -155,6 +155,56 @@ app.post("/tawk-webhook/:site", async (req, res) => {
   }
 });
 
+// ── Chatwoot API — 以 agent 身分回覆訪客 ──
+const CHATWOOT_URL = process.env.CHATWOOT_URL || "https://chatwoot-chatwoot.pkxdtf.easypanel.host";
+const CHATWOOT_TOKEN = process.env.CHATWOOT_TOKEN || "";
+const CHATWOOT_ACCOUNT = process.env.CHATWOOT_ACCOUNT || "1";
+const CHATWOOT_INBOX_SITE = {
+  "1": "aegisrim",
+  "2": "nexautogear",
+  "3": "txrobo",
+  "4": "ewnexus",
+};
+
+async function chatwootReply(conversationId, text) {
+  if (!CHATWOOT_TOKEN) { console.warn("[chatwoot] No CHATWOOT_TOKEN"); return; }
+  const res = await fetch(
+    `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT}/conversations/${conversationId}/messages`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", api_access_token: CHATWOOT_TOKEN },
+      body: JSON.stringify({ content: text, message_type: "outgoing", private: false }),
+    }
+  );
+  if (!res.ok) console.error(`[chatwoot] Reply failed ${res.status}:`, await res.text());
+}
+
+// ── Chatwoot Webhook 端點 ──
+app.post("/chatwoot-webhook", async (req, res) => {
+  res.sendStatus(200);
+  try {
+    const body = req.body || {};
+    if (body.event !== "message_created") return;
+    // 只處理訪客送出的訊息（message_type 0=incoming），忽略 agent 回覆避免無限迴圈
+    if (body.message_type !== 0 && body.message_type !== "incoming") return;
+    const text = (body.content || "").trim();
+    const conversationId = body.conversation?.id;
+    const inboxId = String(body.conversation?.inbox_id || body.inbox_id || "");
+    if (!text || !conversationId || !inboxId) return;
+
+    const site = CHATWOOT_INBOX_SITE[inboxId] || "aegisrim";
+    const persona = PERSONAS[site] || PERSONAS.aegisrim;
+
+    const reply = await (PROVIDER === "openai"
+      ? askOpenAI(persona, [{ role: "user", content: text }])
+      : askAnthropic(persona, [{ role: "user", content: text }]));
+
+    await chatwootReply(conversationId, reply);
+  } catch (err) {
+    console.error("[chatwoot-webhook] Error:", err.message);
+  }
+});
+
 // ── 健康檢查 ──
 app.get("/health", (_req, res) =>
   res.json({ ok: true, provider: PROVIDER, model: PROVIDER === "openai" ? OPENAI_MODEL : ANTHROPIC_MODEL })
