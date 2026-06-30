@@ -210,17 +210,26 @@ async function chatwootHistory(conversationId) {
   } catch { return []; }
 }
 
-// ── Chatwoot Webhook 端點 ──
+// ── Chatwoot Webhook 端點（支援 Agent Bot 格式 + 一般 Webhook 格式）──
 app.post("/chatwoot-webhook", async (req, res) => {
   res.sendStatus(200);
   try {
     const body = req.body || {};
-    if (body.event !== "message_created") return;
-    // 只處理訪客送出的訊息（message_type 0=incoming），忽略 agent 回覆避免無限迴圈
-    if (body.message_type !== 0 && body.message_type !== "incoming") return;
+
+    // Agent Bot 格式：直接送 message 物件，沒有 event 欄位
+    // 一般 Webhook 格式：有 event: "message_created"
+    const isAgentBot = !body.event && body.conversation_id !== undefined;
+    const isRegularWebhook = body.event === "message_created";
+    if (!isAgentBot && !isRegularWebhook) return;
+
+    // 只處理訪客訊息（incoming = 0），忽略 agent/bot 回覆避免無限迴圈
+    const msgType = body.message_type;
+    if (msgType !== 0 && msgType !== "incoming") return;
+
+    // Agent Bot 格式用 conversation_id / inbox_id 直接在 body 上
     const text = (body.content || "").trim();
-    const conversationId = body.conversation?.id;
-    const inboxId = String(body.conversation?.inbox_id || body.inbox_id || "");
+    const conversationId = body.conversation_id || body.conversation?.id;
+    const inboxId = String(body.inbox_id || body.conversation?.inbox_id || "");
     if (!text || !conversationId || !inboxId) return;
 
     const site = CHATWOOT_INBOX_SITE[inboxId] || "aegisrim";
