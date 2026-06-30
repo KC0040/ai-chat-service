@@ -166,6 +166,8 @@ const CHATWOOT_INBOX_SITE = {
   "4": "ewnexus",
 };
 
+const CHATWOOT_AGENT_ID = process.env.CHATWOOT_AGENT_ID || "";
+
 async function chatwootReply(conversationId, text) {
   if (!CHATWOOT_TOKEN) { console.warn("[chatwoot] No CHATWOOT_TOKEN"); return; }
   const res = await fetch(
@@ -177,6 +179,35 @@ async function chatwootReply(conversationId, text) {
     }
   );
   if (!res.ok) console.error(`[chatwoot] Reply failed ${res.status}:`, await res.text());
+}
+
+// AI 回覆後把對話 assign 給人工 agent，讓它出現在 App 收件匣
+async function chatwootAssign(conversationId) {
+  if (!CHATWOOT_AGENT_ID) return;
+  await fetch(
+    `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT}/conversations/${conversationId}/assignments`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", api_access_token: CHATWOOT_TOKEN },
+      body: JSON.stringify({ assignee_id: parseInt(CHATWOOT_AGENT_ID) }),
+    }
+  );
+}
+
+// 抓對話歷史，帶入 AI context（最近 6 輪）
+async function chatwootHistory(conversationId) {
+  try {
+    const res = await fetch(
+      `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT}/conversations/${conversationId}/messages`,
+      { headers: { api_access_token: CHATWOOT_TOKEN } }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const msgs = (data.payload || []).slice(-12);
+    return msgs
+      .filter(m => m.content && (m.message_type === 0 || m.message_type === 1))
+      .map(m => ({ role: m.message_type === 0 ? "user" : "assistant", content: m.content }));
+  } catch { return []; }
 }
 
 // ── Chatwoot Webhook 端點 ──
@@ -195,11 +226,16 @@ app.post("/chatwoot-webhook", async (req, res) => {
     const site = CHATWOOT_INBOX_SITE[inboxId] || "aegisrim";
     const persona = PERSONAS[site] || PERSONAS.aegisrim;
 
+    // 帶入對話歷史，AI 不再失憶
+    const history = await chatwootHistory(conversationId);
+    const messages = [...history.slice(0, -1), { role: "user", content: text }];
+
     const reply = await (PROVIDER === "openai"
-      ? askOpenAI(persona, [{ role: "user", content: text }])
-      : askAnthropic(persona, [{ role: "user", content: text }]));
+      ? askOpenAI(persona, messages)
+      : askAnthropic(persona, messages));
 
     await chatwootReply(conversationId, reply);
+    await chatwootAssign(conversationId); // 讓對話進 App 收件匣
   } catch (err) {
     console.error("[chatwoot-webhook] Error:", err.message);
   }
