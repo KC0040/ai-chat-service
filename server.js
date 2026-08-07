@@ -292,6 +292,13 @@ app.post("/chat", async (req, res) => {
   }
 });
 
+// widget.js route
+app.get("/widget.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.sendFile(path.join(__dirname, "widget.js"));
+});
+
 app.listen(PORT, () =>
   console.log(`✅ AI chat service on :${PORT} (${PROVIDER}: ${PROVIDER === "openai" ? OPENAI_MODEL : ANTHROPIC_MODEL})`)
 );
