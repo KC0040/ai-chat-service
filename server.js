@@ -210,6 +210,15 @@ async function chatwootHistory(conversationId) {
   } catch { return []; }
 }
 
+// 去重快取：防止 Chatwoot 同時觸發兩種格式造成重複回覆
+const _recentMsgIds = new Set();
+function isDuplicate(key) {
+  if (_recentMsgIds.has(key)) return true;
+  _recentMsgIds.add(key);
+  setTimeout(() => _recentMsgIds.delete(key), 10000);
+  return false;
+}
+
 // ── Chatwoot Webhook 端點（支援 Agent Bot 格式 + 一般 Webhook 格式）──
 app.post("/chatwoot-webhook", async (req, res) => {
   res.sendStatus(200);
@@ -231,6 +240,13 @@ app.post("/chatwoot-webhook", async (req, res) => {
     const conversationId = body.conversation_id || body.conversation?.id;
     const inboxId = String(body.inbox_id || body.conversation?.inbox_id || "");
     if (!text || !conversationId || !inboxId) return;
+
+    // 去重：同一 conversation 同一內容 10 秒內只處理一次
+    const dedupKey = `${conversationId}:${text}`;
+    if (isDuplicate(dedupKey)) {
+      console.log(`[chatwoot-webhook] Duplicate suppressed: ${dedupKey}`);
+      return;
+    }
 
     const site = CHATWOOT_INBOX_SITE[inboxId] || "aegisrim";
     const persona = PERSONAS[site] || PERSONAS.aegisrim;
