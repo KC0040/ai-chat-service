@@ -4,6 +4,8 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 COPY server.js ./
+COPY sites.json ./
+COPY widget.js ./
 COPY kb ./kb
 EXPOSE 3000
 ENV PORT=3000
