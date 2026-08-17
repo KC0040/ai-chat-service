@@ -167,7 +167,7 @@ for (const site of SITE_KEYS) {
 const CHATWOOT_AGENT_ID = process.env.CHATWOOT_AGENT_ID || "";
 
 async function chatwootReply(conversationId, text) {
-  if (!CHATWOOT_TOKEN) { console.warn("[chatwoot] No CHATWOOT_TOKEN"); return; }
+  if (!CHATWOOT_TOKEN) { console.warn("[chatwoot] No CHATWOOT_TOKEN"); return null; }
   const res = await fetch(
     `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT}/conversations/${conversationId}/messages`,
     {
@@ -176,7 +176,9 @@ async function chatwootReply(conversationId, text) {
       body: JSON.stringify({ content: text, message_type: "outgoing", private: false }),
     }
   );
-  if (!res.ok) console.error(`[chatwoot] Reply failed ${res.status}:`, await res.text());
+  if (!res.ok) { console.error(`[chatwoot] Reply failed ${res.status}:`, await res.text()); return null; }
+  const data = await res.json();
+  return data.id || null;
 }
 
 // AI 回覆後把對話 assign 給人工 agent，讓它出現在 App 收件匣
@@ -217,6 +219,17 @@ function isDuplicate(key) {
   return false;
 }
 
+// ── 真人接手偵測 ──
+// 問題：AI 回覆後會呼叫 chatwootAssign() 把對話指派給人工方便你在 App 看到，
+// 但如果拿「這則對話有沒有指派人」當作 AI 該不該閉嘴的依據，AI 自己回完第一句
+// 就會把自己判定成「已有人接手」，之後永遠不再回覆——等於只回一次就啞巴。
+// 改成：只有偵測到「不是我們自己送出的」outgoing 訊息（=你在 Chatwoot 裡親自打字回的）
+// 才視為真人接手，接手後 30 分鐘內 AI 讓路；超過 30 分鐘沒有你的新回覆，
+// 訪客再傳訊息時 AI 自動恢復回覆（不用手動「指派回去」）。
+const _ourMessageIds = new Set(); // 我們剛用 API 貼出去的 message id，用來排除自己的回聲
+const _humanActiveUntil = new Map(); // conversationId -> timestamp，這段時間內 AI 不搶答
+const HUMAN_TAKEOVER_WINDOW_MS = 30 * 60 * 1000; // 30 分鐘
+
 // ── Chatwoot Webhook 端點（支援 Agent Bot 格式 + 一般 Webhook 格式）──
 app.post("/chatwoot-webhook", async (req, res) => {
   res.sendStatus(200);
@@ -229,15 +242,29 @@ app.post("/chatwoot-webhook", async (req, res) => {
     const isRegularWebhook = body.event === "message_created";
     if (!isAgentBot && !isRegularWebhook) return;
 
-    // 只處理訪客訊息（incoming = 0），忽略 agent/bot 回覆避免無限迴圈
     const msgType = body.message_type;
+    const conversationId = body.conversation_id || body.conversation?.id;
+    if (!conversationId) return;
+
+    // 訪客以外送出的訊息（outgoing）：判斷是不是我們自己剛貼的 AI 回覆
+    if (msgType === 1 || msgType === "outgoing") {
+      const msgId = body.id;
+      if (msgId && _ourMessageIds.has(msgId)) {
+        _ourMessageIds.delete(msgId); // 是我們自己的回聲，忽略
+        return;
+      }
+      // 不是我們貼的 outgoing 訊息 = 你親自在 Chatwoot 打字回覆了，接手 30 分鐘
+      _humanActiveUntil.set(conversationId, Date.now() + HUMAN_TAKEOVER_WINDOW_MS);
+      console.log(`[chatwoot-webhook] Human reply detected on conversation ${conversationId}, AI stands down for 30min`);
+      return;
+    }
+
+    // 只處理訪客訊息（incoming = 0）
     if (msgType !== 0 && msgType !== "incoming") return;
 
-    // Agent Bot 格式用 conversation_id / inbox_id 直接在 body 上
     const text = (body.content || "").trim();
-    const conversationId = body.conversation_id || body.conversation?.id;
     const inboxId = String(body.inbox_id || body.conversation?.inbox_id || "");
-    if (!text || !conversationId || !inboxId) return;
+    if (!text || !inboxId) return;
 
     // 去重：同一 conversation 同一內容 10 秒內只處理一次
     const dedupKey = `${conversationId}:${text}`;
@@ -246,10 +273,10 @@ app.post("/chatwoot-webhook", async (req, res) => {
       return;
     }
 
-    // 如果對話已經指派給人工 agent，代表有人接手了，AI 不要再搶著回覆
-    const assigneeId = body.conversation?.meta?.assignee?.id || body.conversation?.assignee_id;
-    if (assigneeId) {
-      console.log(`[chatwoot-webhook] Conversation ${conversationId} already assigned to agent ${assigneeId}, skipping AI reply`);
+    // 真人接手時間窗內，AI 讓路給人工
+    const takeoverUntil = _humanActiveUntil.get(conversationId);
+    if (takeoverUntil && Date.now() < takeoverUntil) {
+      console.log(`[chatwoot-webhook] Conversation ${conversationId} in human-takeover window, skipping AI reply`);
       return;
     }
 
@@ -264,8 +291,12 @@ app.post("/chatwoot-webhook", async (req, res) => {
       ? askOpenAI(persona, messages)
       : askAnthropic(persona, messages));
 
-    await chatwootReply(conversationId, reply);
-    await chatwootAssign(conversationId); // 讓對話進 App 收件匣
+    const postedId = await chatwootReply(conversationId, reply);
+    if (postedId) {
+      _ourMessageIds.add(postedId);
+      setTimeout(() => _ourMessageIds.delete(postedId), 30000);
+    }
+    await chatwootAssign(conversationId); // 讓對話進 App 收件匣，方便你隨時查看/接手
   } catch (err) {
     console.error("[chatwoot-webhook] Error:", err.message);
   }
