@@ -24,20 +24,16 @@ if (PROVIDER === "anthropic" && !ANTHROPIC_KEY) {
 
 const app = express();
 
-// 只允許自家網域呼叫
-const ALLOWED_ORIGINS = [
-  "https://www.aegisrim.com",
-  "https://aegisrim.com",
-  "https://www.nexautogear.com",
-  "https://nexautogear.com",
-  "https://www.txrobo.com",
-  "https://txrobo.com",
-  "https://www.ewnexus.com",
-  "https://ewnexus.com",
-  "http://localhost:3000",
-  "http://localhost:8768",
-  "http://localhost:8771",
-];
+// ── 模組化站台設定：新增站點只要編輯 sites.json + 加一份 kb/{site}.md，不用改這支程式 ──
+const fs = require("fs");
+const path = require("path");
+const SITES = JSON.parse(fs.readFileSync(path.join(__dirname, "sites.json"), "utf-8"));
+const SITE_KEYS = Object.keys(SITES);
+const DEFAULT_SITE = "aegisrim"; // 找不到對應 site 參數時的 fallback persona
+
+// 只允許 sites.json 裡登記過網域的來源呼叫（+ 本機開發用的 localhost）
+const LOCAL_DEV_ORIGINS = ["http://localhost:3000", "http://localhost:8768", "http://localhost:8771"];
+const ALLOWED_ORIGINS = [...new Set(SITE_KEYS.flatMap((s) => SITES[s].origins || []).concat(LOCAL_DEV_ORIGINS))];
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json({ limit: "16kb" }));
 
@@ -57,12 +53,15 @@ function rateLimited(ip) {
   return entry.count > RATE_LIMIT;
 }
 
-// ── 兩站知識庫：從 kb/*.md 載入，改 KB 不用動程式碼 ──
-const fs = require("fs");
-const path = require("path");
+// ── 知識庫：依 sites.json 動態從 kb/*.md 載入，改 KB / 加站點都不用動這支程式 ──
 const PERSONAS = {};
-for (const site of ["aegisrim", "nexautogear", "txrobo", "ewnexus"]) {
-  PERSONAS[site] = fs.readFileSync(path.join(__dirname, "kb", site + ".md"), "utf-8");
+for (const site of SITE_KEYS) {
+  const kbFile = path.join(__dirname, "kb", site + ".md");
+  if (fs.existsSync(kbFile)) {
+    PERSONAS[site] = fs.readFileSync(kbFile, "utf-8");
+  } else {
+    console.warn(`[persona] sites.json 有 "${site}" 但找不到 kb/${site}.md，略過`);
+  }
 }
 
 // ── 供應商呼叫 ──
@@ -159,12 +158,11 @@ app.post("/tawk-webhook/:site", async (req, res) => {
 const CHATWOOT_URL = process.env.CHATWOOT_URL || "https://chatwoot-chatwoot.pkxdtf.easypanel.host";
 const CHATWOOT_TOKEN = process.env.CHATWOOT_TOKEN || "";
 const CHATWOOT_ACCOUNT = process.env.CHATWOOT_ACCOUNT || "1";
-const CHATWOOT_INBOX_SITE = {
-  "1": "aegisrim",
-  "2": "nexautogear",
-  "3": "txrobo",
-  "4": "ewnexus",
-};
+// 從 sites.json 的 chatwootInboxId 欄位自動組出對照表
+const CHATWOOT_INBOX_SITE = {};
+for (const site of SITE_KEYS) {
+  if (SITES[site].chatwootInboxId) CHATWOOT_INBOX_SITE[String(SITES[site].chatwootInboxId)] = site;
+}
 
 const CHATWOOT_AGENT_ID = process.env.CHATWOOT_AGENT_ID || "";
 
@@ -232,8 +230,15 @@ app.post("/chatwoot-webhook", async (req, res) => {
     const inboxId = String(body.inbox_id || body.conversation?.inbox_id || "");
     if (!text || !conversationId || !inboxId) return;
 
-    const site = CHATWOOT_INBOX_SITE[inboxId] || "aegisrim";
-    const persona = PERSONAS[site] || PERSONAS.aegisrim;
+    // 如果對話已經指派給人工 agent，代表有人接手了，AI 不要再搶著回覆
+    const assigneeId = body.conversation?.meta?.assignee?.id || body.conversation?.assignee_id;
+    if (assigneeId) {
+      console.log(`[chatwoot-webhook] Conversation ${conversationId} already assigned to agent ${assigneeId}, skipping AI reply`);
+      return;
+    }
+
+    const site = CHATWOOT_INBOX_SITE[inboxId] || DEFAULT_SITE;
+    const persona = PERSONAS[site] || PERSONAS[DEFAULT_SITE];
 
     // 帶入對話歷史，AI 不再失憶
     const history = await chatwootHistory(conversationId);
@@ -267,8 +272,8 @@ app.post("/chat", async (req, res) => {
     if (!message || typeof message !== "string" || message.length > 2000) {
       return res.status(400).json({ error: "Invalid message" });
     }
-    // site 參數決定 AI 身分：aegisrim 或 nexautogear
-    const persona = PERSONAS[site] || PERSONAS.aegisrim;
+    // site 參數決定 AI 身分，對應 sites.json 的 key（找不到就 fallback 到 DEFAULT_SITE）
+    const persona = PERSONAS[site] || PERSONAS[DEFAULT_SITE];
 
     // 帶入最近 6 輪對話歷史
     const messages = [];

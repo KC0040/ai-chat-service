@@ -1,0 +1,28 @@
+{
+  "aegisrim": {
+    "name": "AegisRim",
+    "origins": ["https://www.aegisrim.com", "https://aegisrim.com"],
+    "chatwootInboxId": "1"
+  },
+  "nexautogear": {
+    "name": "NEX Auto Gear",
+    "origins": ["https://www.nexautogear.com", "https://nexautogear.com"],
+    "chatwootInboxId": "2"
+  },
+  "txrobo": {
+    "name": "TXRobo",
+    "origins": ["https://www.txrobo.com", "https://txrobo.com"],
+    "chatwootInboxId": "3"
+  },
+  "ewnexus": {
+    "name": "EWNexus",
+    "origins": ["https://www.ewnexus.com", "https://ewnexus.com"],
+    "chatwootInboxId": "4"
+  },
+  "foong": {
+    "name": "Foong Heating & Cooling",
+    "origins": ["http://localhost:8772"],
+    "chatwootInboxId": null,
+    "_note": "網域確定後把正式 https://www.xxx.com 加進 origins；若之後開 Chatwoot inbox 再補 chatwootInboxId"
+  }
+}
